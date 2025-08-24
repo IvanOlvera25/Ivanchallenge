@@ -1,5 +1,6 @@
 import unittest
 import pandas as pd
+from pathlib import Path
 
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
@@ -28,8 +29,9 @@ class TestModel(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.model = DelayModel()
-        self.data = pd.read_csv(filepath_or_buffer="/data/data.csv")
-        
+        data_file = Path(__file__).resolve().parents[2] / "data" / "data.csv"
+        assert data_file.exists(), f"No se encontró el dataset: {data_file}"
+        self.data = pd.read_csv(data_file)
 
     def test_model_preprocess_for_training(
         self
