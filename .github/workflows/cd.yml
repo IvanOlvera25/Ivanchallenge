@@ -1,0 +1,108 @@
+name: 'Continuous Delivery'
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: flight-delay-api
+  REGION: us-central1
+  IMAGE_TAG: gcr.io/${{ secrets.GCP_PROJECT_ID }}/flight-delay-api:${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        export_default_credentials: true
+    
+    - name: Configure Docker for GCR
+      run: |
+        gcloud auth configure-docker
+    
+    - name: Build Docker image
+      working-directory: challenge_MLE
+      run: |
+        docker build -t ${{ env.IMAGE_TAG }} .
+        docker tag ${{ env.IMAGE_TAG }} gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest
+    
+    - name: Push Docker image to GCR
+      run: |
+        docker push ${{ env.IMAGE_TAG }}
+        docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest
+    
+    - name: Deploy to Cloud Run
+      id: deploy
+      run: |
+        gcloud run deploy ${{ env.SERVICE_NAME }} \
+          --image ${{ env.IMAGE_TAG }} \
+          --platform managed \
+          --region ${{ env.REGION }} \
+          --allow-unauthenticated \
+          --memory 2Gi \
+          --cpu 2 \
+          --timeout 300 \
+          --max-instances 100 \
+          --min-instances 1 \
+          --port 8080 \
+          --set-env-vars "ENVIRONMENT=production"
+    
+    - name: Get Service URL
+      id: service-url
+      run: |
+        SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+          --platform managed \
+          --region ${{ env.REGION }} \
+          --format 'value(status.url)')
+        echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+        echo "Deployed to: $SERVICE_URL"
+    
+    - name: Update Makefile with Service URL
+      working-directory: challenge_MLE
+      run: |
+        sed -i "s|API_URL = .*|API_URL = ${{ steps.service-url.outputs.url }}|" Makefile
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add Makefile
+        git diff --staged --quiet || git commit -m "Update API_URL in Makefile [skip ci]"
+    
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        branch: ${{ github.ref }}
+      if: success()
+    
+    - name: Run smoke test
+      run: |
+        sleep 10
+        curl -f ${{ steps.service-url.outputs.url }}/health || exit 1
+        echo "Health check passed!"
+    
+    - name: Run stress test
+      working-directory: challenge_MLE
+      run: |
+        export API_URL=${{ steps.service-url.outputs.url }}
+        make stress-test
+      continue-on-error: true
+    
+    - name: Deployment notification
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ Deployment successful!"
+          echo "🚀 Service URL: ${{ steps.service-url.outputs.url }}"
+        else
+          echo "❌ Deployment failed!"
+          exit 1
+        fi
