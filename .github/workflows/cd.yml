@@ -18,13 +18,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
     
-    # IMPORTANTE: Primero autenticar con la cuenta de servicio
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v1
       with:
         credentials_json: ${{ secrets.GCP_SA_KEY }}
     
-    # Luego configurar gcloud
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v1
       with:
@@ -72,22 +70,7 @@ jobs:
           --project flight-delay-latam)
         echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
         echo "Deployed to: $SERVICE_URL"
-    
-    - name: Update Makefile with Service URL
-      working-directory: challenge_MLE
-      run: |
-        sed -i "s|API_URL = .*|API_URL = ${{ steps.service-url.outputs.url }}|" Makefile
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add Makefile
-        git diff --staged --quiet || git commit -m "Update API_URL in Makefile [skip ci]"
-    
-    - name: Push changes
-      uses: ad-m/github-push-action@master
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        branch: ${{ github.ref }}
-      if: success()
+        echo "Please update the Makefile with: API_URL = $SERVICE_URL"
     
     - name: Run smoke test
       run: |
@@ -99,8 +82,8 @@ jobs:
       working-directory: challenge_MLE
       run: |
         pip install locust
-        export API_URL=${{ steps.service-url.outputs.url }}
-        make stress-test
+        # Usar la URL directamente en lugar del Makefile
+        locust -f tests/stress/api_stress.py --print-stats --html reports/stress-test.html --run-time 60s --headless --users 100 --spawn-rate 1 -H ${{ steps.service-url.outputs.url }}
       continue-on-error: true
     
     - name: Deployment notification
@@ -109,6 +92,7 @@ jobs:
         if [ "${{ job.status }}" == "success" ]; then
           echo "✅ Deployment successful!"
           echo "🚀 Service URL: ${{ steps.service-url.outputs.url }}"
+          echo "📝 Remember to update Makefile with: API_URL = ${{ steps.service-url.outputs.url }}"
         else
           echo "❌ Deployment failed!"
           exit 1
