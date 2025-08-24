@@ -18,18 +18,11 @@ from challenge.model import DelayModel
 app = FastAPI()
 model = DelayModel()
 
-# Ruta robusta al dataset (…/challenge_MLE/data/data.csv)
 _DATA_FILE = Path(__file__).resolve().parents[1] / "data" / "data.csv"
 
 
-# -----------------------------------------------------------------------------
-# Utilidades
-# -----------------------------------------------------------------------------
 def _serialize_validation_errors(errors):
-    """
-    Convierte los errores de validación a un dict JSON-serializable
-    (evita incluir objetos Exception crudos).
-    """
+  
     sanitized = []
     for err in errors:
         e = dict(err)
@@ -43,44 +36,29 @@ def _serialize_validation_errors(errors):
 
 
 def _ensure_trained():
-    """
-    Entrena el modelo si aún no está entrenado.
-    Se usa en startup y como guard en /predict (por si startup no corre en tests).
-    """
+ 
     if model._model is None:
         df = pd.read_csv(_DATA_FILE)
         X, y = model.preprocess(df, target_column="delay")
         model.fit(X, y)
 
 
-# -----------------------------------------------------------------------------
-# Handlers de error
-# -----------------------------------------------------------------------------
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
-    # Convierte 422 -> 400 y sanitiza el payload
     return JSONResponse(
         status_code=HTTP_400_BAD_REQUEST,
         content={"detail": _serialize_validation_errors(exc.errors())},
     )
 
-
-# -----------------------------------------------------------------------------
-# Startup
-# -----------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     try:
         _ensure_trained()
         print("Model trained successfully (startup)!")
     except Exception as e:
-        # No aborta el arranque; /predict hará lazy-train si hace falta
         print(f"Startup training failed (will lazy-train on demand): {e}")
 
 
-# -----------------------------------------------------------------------------
-# Esquemas de entrada (Pydantic v1)
-# -----------------------------------------------------------------------------
 class Flight(BaseModel):
     OPERA: str
     TIPOVUELO: str
@@ -120,10 +98,8 @@ async def get_health() -> dict:
 @app.post("/predict", status_code=200)
 async def post_predict(data: FlightsRequest) -> dict:
     try:
-        # Entrenamiento bajo demanda por si el startup no se ejecutó en tests
         _ensure_trained()
 
-        # Construir DataFrame con los campos que tu preprocess requiere
         flights_data = []
         for f in data.flights:
             flights_data.append(
@@ -131,7 +107,6 @@ async def post_predict(data: FlightsRequest) -> dict:
                     "OPERA": f.OPERA,
                     "TIPOVUELO": f.TIPOVUELO,
                     "MES": f.MES,
-                    # Valores dummy requeridos por preprocess (fechas y varios campos)
                     "Fecha-I": "2022-01-01 10:00:00",
                     "Fecha-O": "2022-01-01 10:00:00",
                     "DIA": 1,
@@ -156,8 +131,6 @@ async def post_predict(data: FlightsRequest) -> dict:
         return {"predict": preds}
 
     except ValueError as e:
-        # Errores de negocio -> 400 (lo que esperan tus tests)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        # Cualquier otro error inesperado
         raise HTTPException(status_code=500, detail=f"Prediction error: {e}")
