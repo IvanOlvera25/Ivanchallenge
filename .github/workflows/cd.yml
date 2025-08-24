@@ -6,10 +6,9 @@ on:
       - main
 
 env:
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  PROJECT_ID: flight-delay-latam
   SERVICE_NAME: flight-delay-api
   REGION: us-central1
-  IMAGE_TAG: gcr.io/${{ secrets.GCP_PROJECT_ID }}/flight-delay-api:${{ github.sha }}
 
 jobs:
   deploy:
@@ -19,33 +18,38 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
     
+    # IMPORTANTE: Primero autenticar con la cuenta de servicio
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+    
+    # Luego configurar gcloud
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v1
       with:
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
-        project_id: ${{ secrets.GCP_PROJECT_ID }}
-        export_default_credentials: true
+        project_id: flight-delay-latam
     
     - name: Configure Docker for GCR
       run: |
-        gcloud auth configure-docker
+        gcloud auth configure-docker --quiet
     
     - name: Build Docker image
       working-directory: challenge_MLE
       run: |
-        docker build -t ${{ env.IMAGE_TAG }} .
-        docker tag ${{ env.IMAGE_TAG }} gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest
+        docker build -t gcr.io/flight-delay-latam/flight-delay-api:${{ github.sha }} .
+        docker tag gcr.io/flight-delay-latam/flight-delay-api:${{ github.sha }} gcr.io/flight-delay-latam/flight-delay-api:latest
     
     - name: Push Docker image to GCR
       run: |
-        docker push ${{ env.IMAGE_TAG }}
-        docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}:latest
+        docker push gcr.io/flight-delay-latam/flight-delay-api:${{ github.sha }}
+        docker push gcr.io/flight-delay-latam/flight-delay-api:latest
     
     - name: Deploy to Cloud Run
       id: deploy
       run: |
         gcloud run deploy ${{ env.SERVICE_NAME }} \
-          --image ${{ env.IMAGE_TAG }} \
+          --image gcr.io/flight-delay-latam/flight-delay-api:${{ github.sha }} \
           --platform managed \
           --region ${{ env.REGION }} \
           --allow-unauthenticated \
@@ -55,7 +59,8 @@ jobs:
           --max-instances 100 \
           --min-instances 1 \
           --port 8080 \
-          --set-env-vars "ENVIRONMENT=production"
+          --set-env-vars "ENVIRONMENT=production" \
+          --project flight-delay-latam
     
     - name: Get Service URL
       id: service-url
@@ -63,7 +68,8 @@ jobs:
         SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
           --platform managed \
           --region ${{ env.REGION }} \
-          --format 'value(status.url)')
+          --format 'value(status.url)' \
+          --project flight-delay-latam)
         echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
         echo "Deployed to: $SERVICE_URL"
     
@@ -92,6 +98,7 @@ jobs:
     - name: Run stress test
       working-directory: challenge_MLE
       run: |
+        pip install locust
         export API_URL=${{ steps.service-url.outputs.url }}
         make stress-test
       continue-on-error: true
