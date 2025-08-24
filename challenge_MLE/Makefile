@@ -23,7 +23,8 @@ install:		## Install dependencies
 	pip install -r requirements-test.txt
 	pip install -r requirements.txt
 
-API_URL = https://your-api-url.a.run.app
+API_URL = https://flight-delay-api-cpsxrlozma-uc.a.run.app
+
 STRESS_URL = http://127.0.0.1:8000 
 .PHONY: stress-test
 stress-test:
