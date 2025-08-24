@@ -1,7 +1,91 @@
 name: 'Continuous Integration'
 
 on:
-  ...
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
 
 jobs:
-  ...
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: [3.9]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        if [ -f requirements-test.txt ]; then pip install -r requirements-test.txt; fi
+        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+    
+    - name: Run model tests
+      run: |
+        make model-test
+    
+    - name: Run API tests  
+      run: |
+        make api-test
+    
+    - name: Generate test report
+      if: always()
+      run: |
+        # Create test report summary
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "- Model tests: ${{ steps.model-test.outcome || 'completed' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- API tests: ${{ steps.api-test.outcome || 'completed' }}" >> $GITHUB_STEP_SUMMARY
+    
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort
+    
+    - name: Run Black formatter check
+      run: |
+        black --check challenge/
+      continue-on-error: true
+    
+    - name: Run isort import checker
+      run: |
+        isort --check-only challenge/
+      continue-on-error: true
+    
+    - name: Run Flake8 linter
+      run: |
+        flake8 challenge/ --max-line-length=100 --extend-ignore=E203,W503
+      continue-on-error: true
